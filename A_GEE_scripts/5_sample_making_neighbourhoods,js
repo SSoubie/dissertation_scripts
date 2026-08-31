@@ -1,0 +1,205 @@
+// =========================================================================
+// MODULE 5 - GENERATE SAR MODELLING DATASET - NEIGHBOURHOODS
+// =========================================================================
+
+
+// OBJECTIVE: This module generates the final SAR modelling dataset by calculating the mean and standard deviation of the six corrected SAR features. The neighbourhoods are constructed using the exact same sample centres as the final pixel-level dataset, ensuring consistency in spatial representation. 
+
+
+// -------------------------------------------------------------------------
+// 0. LOAD PARAMETERS
+// -------------------------------------------------------------------------
+var params = require('users/SSoubie95/CASA25:Dissertation/0_data_load_and_parameter_settings');
+
+// -------------------------------------------------------------------------
+// 1. LOAD FINAL PIXEL-LEVEL SAMPLE
+// -------------------------------------------------------------------------
+var POINTS_ASSET = 'projects/divine-engine-488410-g2/assets/rf_points_dataset_corrected';
+
+var pointsRaw = ee.FeatureCollection(POINTS_ASSET);
+
+print(
+  'Uploaded pixel-level sample:',
+  pointsRaw.size()
+);
+
+
+// -------------------------------------------------------------------------
+// 2. RECONSTRUCT POINT GEOMETRY FROM X / Y
+// -------------------------------------------------------------------------
+// The neighbourhood centres are exactly those exported by Module 4.
+var points = pointsRaw.map(function (f) {
+  var x = ee.Number(f.get('x'));
+  var y = ee.Number(f.get('y'));
+  var point = ee.Geometry.Point(
+    [x, y],
+    params.WORKING_CRS
+  );
+  return ee.Feature(point)
+    .set({
+      'class': f.get('class'),
+      'source': f.get('source'),
+      'x': x,
+      'y': y
+    });
+});
+
+print(
+  'Reconstructed sample centres:',
+  points.size()
+);
+
+// -------------------------------------------------------------------------
+// 3. LOAD CORRECTED SAR COMPOSITES
+// -------------------------------------------------------------------------
+var s1 = ee.Image(
+  'projects/divine-engine-488410-g2/assets/images/s1_composite_corrected'
+).select(
+  ['VV', 'VH', 'ratio'],
+  ['s1_VV', 's1_VH', 's1_ratio']
+);
+
+var sao = ee.Image(
+  'projects/divine-engine-488410-g2/assets/images/saocom_composite_corrected'
+).select(
+  ['HH', 'HV', 'ratio'],
+  ['sao_HH', 'sao_HV', 'sao_ratio']
+);
+
+var stack = s1.addBands(sao);
+
+print(
+  'SAR bands:',
+  stack.bandNames()
+);
+
+// Exact grid of the final materialised composite.
+var refProjection = s1
+  .select('s1_VV')
+  .projection();
+
+print(
+  'Reference projection:',
+  refProjection
+);
+
+// -------------------------------------------------------------------------
+// 4. CREATE 30 m-RADIUS NEIGHBOURHOODS
+// -------------------------------------------------------------------------
+// Each original sample centre becomes one circular object.
+// Positive and pseudo-negative observations therefore use exactly the
+// same spatial representation.
+// -------------------------------------------------------------------------
+var neighbourhoods = points.map(function (f) {
+  var neighbourhood = f
+    .geometry()
+    .buffer(30);
+  return ee.Feature(neighbourhood)
+    .set({
+      'class': f.get('class'),
+      'source': f.get('source'),
+      'x': f.get('x'),
+      'y': f.get('y')
+    });
+});
+
+print(
+  'Neighbourhood objects:',
+  neighbourhoods.size()
+);
+
+// -------------------------------------------------------------------------
+// 5. REDUCER
+// -------------------------------------------------------------------------
+var reducer = ee.Reducer
+  .mean()
+  .combine({
+    reducer2: ee.Reducer.stdDev(),
+    sharedInputs: true
+  });
+
+
+// -------------------------------------------------------------------------
+// 6. EXTRACT NEIGHBOURHOOD FEATURES
+// -------------------------------------------------------------------------
+// Masked pixels remain excluded because the corrected SAR composites already
+// contain the common final operational mask.
+// The neighbourhood statistics therefore summarize only valid SAR pixels
+// occurring inside each 30 m buffer.
+// -------------------------------------------------------------------------
+var neighbourhoodData = stack.reduceRegions({
+  collection: neighbourhoods,
+  reducer: reducer,
+  scale: 10,
+  crs: refProjection,
+  tileScale: 4
+});
+
+
+// -------------------------------------------------------------------------
+// 7. SANITY CHECKS
+// -------------------------------------------------------------------------
+
+print(
+  'Uploaded pixel-level sample:',
+  pointsRaw.size()
+);
+
+print(
+  'Reconstructed sample centres:',
+  points.size()
+);
+
+print(
+  'Positive centres:',
+  points
+    .filter(ee.Filter.eq('class', 1))
+    .size()
+);
+
+print(
+  'Pseudo-negative centres:',
+  points
+    .filter(ee.Filter.eq('class', 0))
+    .size()
+);
+
+print(
+  'SAR bands:',
+  stack.bandNames()
+);
+
+// -------------------------------------------------------------------------
+// 8. EXPORT
+// -------------------------------------------------------------------------
+Export.table.toDrive({
+  collection: neighbourhoodData,
+  description:
+    'rf_neighbourhoods_s1_saocom_corrected',
+  fileNamePrefix:
+    'rf_neighbourhoods_s1_saocom_corrected',
+  fileFormat: 'CSV',
+  selectors: [
+    'class',
+    'source',
+    'x',
+    'y',
+    // Sentinel-1 mean
+    's1_VV_mean',
+    's1_VH_mean',
+    's1_ratio_mean',
+    // SAOCOM mean
+    'sao_HH_mean',
+    'sao_HV_mean',
+    'sao_ratio_mean',
+    // Sentinel-1 SD
+    's1_VV_stdDev',
+    's1_VH_stdDev',
+    's1_ratio_stdDev',
+    // SAOCOM SD
+    'sao_HH_stdDev',
+    'sao_HV_stdDev',
+    'sao_ratio_stdDev'
+  ]
+});
+
