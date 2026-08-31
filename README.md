@@ -11,9 +11,9 @@ Three predictor sets are evaluated in both cases: Sentinel-1 only, SAOCOM only, 
 
 ## Repository structure
 
-A_GEE_scripts/       Google Earth Engine preprocessing and sample generation
-B_python_scripts/    Random Forest modelling and evaluation
-data/                Final modelling datasets
++ A_GEE_scripts/       Google Earth Engine preprocessing and sample generation
++ B_python_scripts/    Random Forest modelling and evaluation
++ data/                Final modelling datasets
 
 
 ## Workflow
